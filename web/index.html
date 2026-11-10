@@ -1,0 +1,398 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Ilia Okhrimenko -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Underdog Woof TTS</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #18181b;
+    --muted: #6b7280;
+    --line: #e4e4e7;
+    --field: #fafafa;
+    --accent: #2563eb;
+    --accent-fg: #ffffff;
+    --error-bg: #fef2f2;
+    --error-fg: #b91c1c;
+    --error-line: #fecaca;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0b0d;
+      --fg: #e7e7ea;
+      --muted: #9ca3af;
+      --line: #27272a;
+      --field: #16161a;
+      --accent: #3b82f6;
+      --accent-fg: #ffffff;
+      --error-bg: #2a1215;
+      --error-fg: #fca5a5;
+      --error-line: #7f1d1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1rem 4rem;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 42rem; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; }
+  textarea {
+    width: 100%;
+    min-height: 7rem;
+    padding: .75rem;
+    font: inherit;
+    color: inherit;
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: .5rem;
+    resize: vertical;
+  }
+  textarea:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+    margin-top: .75rem;
+  }
+  label { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); }
+  select, button {
+    font: inherit;
+    padding: .5rem .75rem;
+    border-radius: .5rem;
+    border: 1px solid var(--line);
+    background: var(--field);
+    color: inherit;
+    min-height: 44px;
+  }
+  button {
+    cursor: pointer;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+  button:disabled { opacity: .6; cursor: progress; }
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border-color: var(--line);
+    font-weight: 400;
+  }
+  .hint {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: .4rem;
+    font-size: .8rem;
+    color: var(--muted);
+  }
+  .status {
+    min-height: 1.5rem;
+    margin: 1rem 0 0;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+  }
+  .spinner {
+    width: .6rem;
+    height: .6rem;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1s ease-in-out infinite;
+    flex: none;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: .25; transform: scale(.8); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; opacity: 1; }
+  }
+  .card {
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: .75rem;
+    background: var(--field);
+  }
+  audio { width: 100%; }
+  .meta { margin: .6rem 0 .4rem; font-size: .85rem; color: var(--muted); }
+  .download { color: var(--accent); font-size: .9rem; }
+  .error {
+    margin-top: 1rem;
+    padding: .75rem 1rem;
+    border: 1px solid var(--error-line);
+    border-radius: .5rem;
+    background: var(--error-bg);
+    color: var(--error-fg);
+  }
+  .hidden { display: none !important; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    font-size: .8rem;
+    color: var(--muted);
+  }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Underdog Woof TTS</h1>
+  <p class="lede">A 40 MB English text-to-speech model running on this server's CPU.</p>
+
+  <form id="form" action="/tts" method="get" novalidate>
+    <label class="sr-only" for="text">Text to speak</label>
+    <textarea id="text" name="text" maxlength="2000" spellcheck="true"
+      placeholder="Type English text here...">Hey guys! I think I've found the coolest model for text-to-speech conversion!</textarea>
+
+    <div class="row">
+      <label for="voice">Voice
+        <select id="voice" name="voice">
+          <option value="juno" selected>Juno</option>
+          <option value="mira">Mira</option>
+        </select>
+      </label>
+      <label for="rate">Rate
+        <select id="rate" name="rate">
+          <option value="1">1x</option>
+          <option value="1.25">1.25x</option>
+          <option value="1.3" selected>1.3x</option>
+          <option value="1.4">1.4x</option>
+        </select>
+      </label>
+      <button id="speak" type="submit">Speak</button>
+      <button id="cancel" class="secondary hidden" type="button">Cancel</button>
+    </div>
+
+    <div class="hint">
+      <span id="counter">0 / 2000</span>
+      <span>Ctrl+Enter to speak</span>
+    </div>
+  </form>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <section id="result" class="card hidden" aria-label="Generated audio">
+    <audio id="audio" controls preload="metadata"></audio>
+    <p id="meta" class="meta"></p>
+    <a id="download" class="download" download="speech.wav">Download .wav</a>
+  </section>
+
+  <div id="error" class="error hidden" role="alert"></div>
+
+  <footer>
+    Voice by <a href="https://underdog.ai" rel="noopener">Underdog Woof</a> &middot;
+    wrapper code MIT &middot; model under the
+    <a href="https://github.com/quqe/underdog-woof-tts/blob/main/LICENSING.md">Underdog Non-Commercial License</a>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var form = document.getElementById("form");
+  var textEl = document.getElementById("text");
+  var voiceEl = document.getElementById("voice");
+  var rateEl = document.getElementById("rate");
+  var speakBtn = document.getElementById("speak");
+  var cancelBtn = document.getElementById("cancel");
+  var statusEl = document.getElementById("status");
+  var resultEl = document.getElementById("result");
+  var audioEl = document.getElementById("audio");
+  var metaEl = document.getElementById("meta");
+  var downloadEl = document.getElementById("download");
+  var errorEl = document.getElementById("error");
+  var counterEl = document.getElementById("counter");
+  var maxChars = 2000;
+
+  var controller = null;
+  var timer = null;
+  var startedAt = 0;
+  var currentUrl = null;
+
+  function updateCounter() {
+    counterEl.textContent = textEl.value.length + " / " + maxChars;
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+  }
+
+  function clearError() {
+    errorEl.textContent = "";
+    errorEl.classList.add("hidden");
+  }
+
+  function setBusy(busy) {
+    speakBtn.disabled = busy;
+    speakBtn.textContent = busy ? "Generating\u2026" : "Speak";
+    cancelBtn.classList.toggle("hidden", !busy);
+    form.setAttribute("aria-busy", busy ? "true" : "false");
+  }
+
+  function elapsed() {
+    return ((performance.now() - startedAt) / 1000).toFixed(1) + "s";
+  }
+
+  function setGenerating() {
+    statusEl.innerHTML = '<span class="spinner" aria-hidden="true"></span><span id="status-text"></span>';
+    document.getElementById("status-text").textContent = "Generating\u2026 " + elapsed();
+    timer = setInterval(function () {
+      var el = document.getElementById("status-text");
+      if (el) el.textContent = "Generating\u2026 " + elapsed();
+    }, 100);
+  }
+
+  function stopGenerating() {
+    if (timer) { clearInterval(timer); timer = null; }
+    statusEl.textContent = "";
+  }
+
+  function describe(res) {
+    var voice = res.headers.get("X-Voice") || voiceEl.value;
+    var rate = res.headers.get("X-Rate") || rateEl.value;
+    var audio = res.headers.get("X-Audio-Seconds");
+    var gen = res.headers.get("X-Generation-Seconds");
+    var name = voice.charAt(0).toUpperCase() + voice.slice(1);
+    var parts = [name, rate + "\u00d7"];
+    if (audio) parts.push(audio + "s of audio");
+    if (gen) parts.push("generated in " + gen + "s");
+    return parts.join(" \u00b7 ");
+  }
+
+  async function speak() {
+    var text = textEl.value.trim();
+    if (!text) { showError("Type some English text first."); return; }
+    if (controller) return;
+
+    clearError();
+    resultEl.classList.add("hidden");
+    controller = new AbortController();
+    startedAt = performance.now();
+    setBusy(true);
+    setGenerating();
+    document.title = "Generating\u2026";
+
+    var url = "/tts?text=" + encodeURIComponent(text) +
+      "&voice=" + encodeURIComponent(voiceEl.value) +
+      "&rate=" + encodeURIComponent(rateEl.value);
+
+    try {
+      var res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        var message = "HTTP " + res.status;
+        try {
+          var body = await res.json();
+          if (body && body.error) message = body.error;
+        } catch (ignored) { /* not JSON */ }
+        throw new Error(message);
+      }
+      var blob = await res.blob();
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      currentUrl = URL.createObjectURL(blob);
+      audioEl.src = currentUrl;
+      downloadEl.href = currentUrl;
+      metaEl.textContent = describe(res);
+      resultEl.classList.remove("hidden");
+      stopGenerating();
+      try {
+        await audioEl.play();
+      } catch (ignored) {
+        /* autoplay may be blocked; the native controls stay available */
+      }
+    } catch (err) {
+      stopGenerating();
+      if (err && err.name === "AbortError") {
+        statusEl.textContent = "Cancelled.";
+      } else {
+        showError(err && err.message ? err.message : "Request failed.");
+      }
+    } finally {
+      controller = null;
+      setBusy(false);
+      document.title = "Underdog Woof TTS";
+    }
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    speak();
+  });
+
+  cancelBtn.addEventListener("click", function () {
+    if (controller) controller.abort();
+  });
+
+  textEl.addEventListener("input", updateCounter);
+
+  textEl.addEventListener("keydown", function (event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      speak();
+    }
+  });
+
+  audioEl.addEventListener("error", function () {
+    if (audioEl.src) showError("Could not play the generated audio.");
+  });
+
+  function prefillFromQuery() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.has("text")) textEl.value = params.get("text");
+    if (params.has("voice")) {
+      var voice = params.get("voice");
+      if ([].some.call(voiceEl.options, function (o) { return o.value === voice; })) voiceEl.value = voice;
+    }
+    if (params.has("rate")) {
+      var rate = params.get("rate");
+      if ([].some.call(rateEl.options, function (o) { return o.value === rate; })) rateEl.value = rate;
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      var res = await fetch("/health");
+      if (!res.ok) return;
+      var data = await res.json();
+      if (data && data.max_chars) {
+        maxChars = data.max_chars;
+        textEl.maxLength = maxChars;
+        updateCounter();
+      }
+    } catch (ignored) { /* keep defaults */ }
+  }
+
+  prefillFromQuery();
+  updateCounter();
+  loadHealth();
+})();
+</script>
+</body>
+</html>

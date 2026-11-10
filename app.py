@@ -33,6 +33,7 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "3005"))
 DEFAULT_VOICE = os.environ.get("DEFAULT_VOICE", "juno")
 WEIGHTS = os.environ.get("WOOF_WEIGHTS") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "woof_int8.npz")
+INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 MAX_CHARS = int(os.environ.get("MAX_CHARS", "2000"))
 QUEUE_TIMEOUT = float(os.environ.get("QUEUE_TIMEOUT", "120"))
 # Each voice costs ~250 MB of RSS. Cache 2 by default (Juno + Mira); set 1 to stay near 300 MB.
@@ -67,29 +68,6 @@ class TempoError(RuntimeError):
 
 class RateUnavailable(RuntimeError):
     pass
-
-
-INDEX_HTML = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Underdog Woof TTS</title>
-<style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}
-textarea{width:100%;min-height:6rem;font:inherit;padding:.5rem}
-select,button{font:inherit;padding:.4rem .8rem;margin-top:.6rem}
-code{background:#f4f4f5;padding:.15rem .3rem;border-radius:4px}</style></head>
-<body><h1>Underdog Woof TTS</h1>
-<form action="/tts" method="get">
-<textarea name="text" placeholder="Type English text here...">Hey guys! I think I've found the coolest model for text-to-speech conversion!</textarea>
-<div><select name="voice"><option>juno</option><option>mira</option></select>
-<select name="rate"><option>1</option><option>1.25</option><option>1.3</option><option>1.4</option></select>
-<button type="submit">Speak</button></div>
-</form>
-<p>Or straight from the shell:<br>
-<code>curl -o speech.wav "http://localhost:__PORT__/tts?my%20super%20text"</code><br>
-<code>curl -o fast.wav "http://localhost:__PORT__/tts?my%20super%20text&amp;rate=1.3"</code></p>
-<footer>Voice by <a href="https://underdog.ai">Underdog Woof</a> &middot;
-wrapper code MIT &middot; model under the
-<a href="https://github.com/quqe/underdog-woof-tts/blob/main/LICENSING.md">Underdog Non-Commercial License</a></footer>
-</body></html>
-"""
 
 
 def wav_seconds(data: bytes) -> float:
@@ -218,8 +196,12 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path.rstrip("/") or "/"
 
         if path == "/":
-            body = INDEX_HTML.replace("__PORT__", str(PORT)).encode()
-            return self._send(200, body, "text/html; charset=utf-8")
+            try:
+                with open(INDEX_PATH, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                return self._error(500, "web/index.html is missing from the image")
+            return self._send(200, body, "text/html; charset=utf-8", {"Cache-Control": "no-cache"})
 
         if path == "/health":
             return self._json(200, {

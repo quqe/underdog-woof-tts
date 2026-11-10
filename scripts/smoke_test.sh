@@ -14,6 +14,11 @@ echo "smoke test: $BASE"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health")
 check "/health" "$code"
 
+curl -sf -o "$TMP/page.html" -D "$TMP/page.h" "$BASE/"
+check "GET /" "$(grep -i '^content-type' "$TMP/page.h" | tr -d '\r')"
+grep -q "<audio" "$TMP/page.html" || { echo "  index page has no <audio> element"; exit 1; }
+check "  index page markup" "$(wc -c < "$TMP/page.html") bytes, has <audio>"
+
 curl -sf -o "$TMP/raw.wav" -D "$TMP/raw.h" "$BASE/tts?my%20super%20text"
 check "GET /tts?my%20super%20text" "$(grep -i '^content-type' "$TMP/raw.h" | tr -d '\r')"
 

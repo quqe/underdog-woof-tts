@@ -32,6 +32,13 @@ docker stats --no-stream
 curl -o /tmp/mira.wav "http://localhost:3005/tts?A%20short%20check.&voice=mira"
 ```
 
+If you changed `web/index.html`, the optional headless test walks the page through submit,
+generating and error states (needs Node and jsdom):
+
+```bash
+npm install --no-save jsdom && node tests/ui.test.js
+```
+
 ## Commit messages
 
 English, imperative mood, short subject line under 72 characters, body wrapped at 72 columns

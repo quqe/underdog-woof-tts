@@ -112,6 +112,7 @@ COPY --chown=woof:woof underdog_woof ./underdog_woof
 COPY --chown=woof:woof app.py LICENSE NOTICE ./
 COPY --chown=woof:woof LICENSES ./LICENSES
 COPY --chown=woof:woof LICENSING.md ./
+COPY --chown=woof:woof web ./web
 
 RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin woof
 USER woof

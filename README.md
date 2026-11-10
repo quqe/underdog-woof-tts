@@ -34,7 +34,24 @@ The 40.6 MB model weights are **not stored in this repository**: the build downl
 from Hugging Face at a pinned revision and verifies their sha256. Internet access is only
 needed during `docker compose build`; the container itself runs fully offline.
 
-Open <http://localhost:3005/> in a browser for a minimal test form.
+Open <http://localhost:3005/> in a browser for a minimal test page. It submits the form with
+`fetch`, shows an elapsed-time indicator while the server synthesizes, then plays the WAV
+in place - no page reload. Without JavaScript the plain form still works (it is a normal GET
+form). Query parameters prefill it: `/?text=Hello&voice=mira&rate=1.3`.
+
+### Web UI
+
+`GET /` serves `web/index.html`: one file, no frameworks, no external assets, so it works on
+an air-gapped server. Behaviour:
+
+* `Ctrl+Enter` (or `Cmd+Enter`) speaks, `Enter` inserts a newline.
+* While generating: pulsing indicator, elapsed seconds, disabled button, `Cancel` (aborts the
+  wait; the server finishes the sentence it is working on).
+* On success: native `<audio controls>` appears in place, with voice, rate, audio length and
+  generation time, plus a `Download .wav` link.
+* Errors from the API (`text too long`, `unknown voice`, ...) are shown as a red notice and
+  the form keeps its contents.
+* The page is English-only, like the rest of the repository.
 
 ## Build and weights
 
@@ -241,6 +258,7 @@ from the `Dockerfile` and you get 348 MB.
 
 ```
 app.py                 HTTP server (stdlib http.server, no frameworks)
+web/index.html         single-file web UI (inline CSS + JS, no external assets)
 underdog_woof/         model code from the upstream HF repository (unmodified)
 Dockerfile             multi-stage: downloads ffmpeg + weights, python:3.13-slim, non-root
 docker-compose.yml     port 3005, resource limits, read-only rootfs
@@ -250,6 +268,7 @@ LICENSING.md           license FAQ: what you may and may not do
 REUSE.toml             machine-readable license mapping for every file
 scripts/smoke_test.sh  end-to-end checks against a running container
 scripts/fetch_model.py download weights and model code for local runs
+tests/ui.test.js       optional headless check of the web page (jsdom)
 ```
 
 The weights (`woof_int8.npz`) are not committed: they arrive at build time from Hugging Face,
