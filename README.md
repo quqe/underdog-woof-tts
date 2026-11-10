@@ -4,6 +4,21 @@ A thin HTTP wrapper around [Underdog Woof](https://huggingface.co/ConwayResearch
 a 40 MB English text-to-speech model that runs on numpy, on CPU, without a GPU. The service
 exposes a single GET endpoint that returns a ready-to-play WAV file.
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Model license: Underdog NC 1.0](https://img.shields.io/badge/model%20license-Underdog%20NC%201.0-orange.svg)](LICENSES/LicenseRef-Underdog-NonCommercial-1.0.txt)
+
+## License at a glance
+
+| What | License | Commercial use |
+|---|---|---|
+| Wrapper code: `app.py`, `Dockerfile`, `docker-compose.yml`, `Makefile`, `scripts/`, docs | [MIT](LICENSE) | **Yes** - copy, modify, sell, embed anywhere |
+| Model code (`underdog_woof/`) and the weights | [Underdog Non-Commercial 1.0](LICENSES/LicenseRef-Underdog-NonCommercial-1.0.txt) | **No** - needs a license from Underdog |
+| Audio this service generates | Yours, under Underdog Non-Commercial 1.0 | **No** - credit "Underdog Woof" required |
+
+Running this service with the Underdog Woof model **commercially requires a commercial
+license** (license@conway.tech) even though the wrapper code is MIT. Full details and an FAQ:
+[LICENSING.md](LICENSING.md).
+
 ## Quick start
 
 ```bash
@@ -90,6 +105,12 @@ Errors are JSON with status 400/404/405/413/503, for example:
   "max_chars": 2000,
   "ffmpeg": true,
   "rate_range": [0.5, 2.0],
+  "license": {
+    "code": "MIT",
+    "model": "Underdog-NonCommercial-1.0",
+    "attribution": "Voice by Underdog Woof",
+    "details": "https://github.com/quqe/underdog-woof-tts/blob/main/LICENSING.md"
+  },
   "uptime_s": 12.3,
   "requests": 4,
   "audio_seconds": 31.7
@@ -168,6 +189,10 @@ app.py                 HTTP server (stdlib http.server, no frameworks)
 underdog_woof/         model code from the upstream HF repository (unmodified)
 Dockerfile             multi-stage: downloads ffmpeg + weights, python:3.13-slim, non-root
 docker-compose.yml     port 3005, resource limits, read-only rootfs
+LICENSE                MIT, applies to the wrapper code
+LICENSES/              upstream Underdog Non-Commercial License 1.0 (verbatim)
+LICENSING.md           license FAQ: what you may and may not do
+REUSE.toml             machine-readable license mapping for every file
 scripts/smoke_test.sh  end-to-end checks against a running container
 scripts/fetch_model.py download weights and model code for local runs
 ```
@@ -201,17 +226,16 @@ docker compose up -d --build
 
 ## Licensing
 
-This repository mixes two different licenses:
-
 | Part | License |
 |---|---|
-| Wrapper code: `app.py`, `Dockerfile`, `docker-compose.yml`, `Makefile`, `scripts/*` | MIT (see `LICENSE-MIT`) |
-| Model code in `underdog_woof/` and the weights `woof_int8.npz` | Underdog Non-Commercial 1.0 (see `LICENSE`) |
+| Wrapper code: `app.py`, `Dockerfile`, `docker-compose.yml`, `Makefile`, `scripts/*`, docs | MIT, see `LICENSE` |
+| Model code in `underdog_woof/` and the weights `woof_int8.npz` | Underdog Non-Commercial 1.0, see `LICENSES/` |
 
-In short: you may reuse the wrapper freely, but the model and anything it generates remain
-under Underdog's non-commercial terms. Published audio must credit "Underdog Woof" or
-"underdog.ai"; commercial use needs a commercial license from Underdog
+The short version: reuse the wrapper freely, including commercially. The model does not come
+with those rights - its audio may be published only with credit ("Underdog Woof" /
+"underdog.ai"), and any commercial use needs a license from Underdog
 (license@conway.tech). Do not train, fine-tune or distill other speech models on its output.
+See [LICENSING.md](LICENSING.md) for the full FAQ.
 
 ## Contributing
 

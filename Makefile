@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
+
 IMAGE ?= underdog-woof-tts:1.0
 NAME  ?= underdog-woof-tts
 PORT  ?= 3005

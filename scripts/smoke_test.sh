@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
 # End-to-end smoke test against a running container. Usage: ./scripts/smoke_test.sh [base_url]
 set -euo pipefail
 BASE="${1:-http://localhost:3005}"

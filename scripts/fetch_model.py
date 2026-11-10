@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
 """Re-download model code + weights from the Hugging Face Hub into this project.
 
 Only needed if woof_int8.npz or underdog_woof/ is missing (both are already vendored here).

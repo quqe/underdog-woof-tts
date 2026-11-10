@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
 
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
+
 # --- stage 1: downloadable assets -------------------------------------------
 # Both downloads are pinned and checksum-verified, so the build is reproducible
 # and the repo does not have to carry the 40 MB weights.
@@ -36,6 +39,11 @@ RUN apt-get update \
 # --- stage 2: runtime -------------------------------------------------------
 FROM python:3.13-slim
 
+LABEL org.opencontainers.image.title="underdog-woof-tts" \
+      org.opencontainers.image.description="Minimal Docker HTTP API for the Underdog Woof text-to-speech model. Wrapper code is MIT; the model and its weights are Underdog Non-Commercial 1.0." \
+      org.opencontainers.image.source="https://github.com/quqe/underdog-woof-tts" \
+      org.opencontainers.image.licenses="MIT AND LicenseRef-Underdog-NonCommercial-1.0"
+
 # One BLAS thread: the model is single-threaded by design, extra threads only spin.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -55,6 +63,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=woof:woof underdog_woof ./underdog_woof
 COPY --chown=woof:woof app.py LICENSE NOTICE ./
+COPY --chown=woof:woof LICENSES ./LICENSES
+COPY --chown=woof:woof LICENSING.md ./
 
 RUN useradd --uid 10001 --user-group --no-create-home --shell /usr/sbin/nologin woof
 USER woof

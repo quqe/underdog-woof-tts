@@ -1,1 +1,3 @@
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
 numpy==2.5.4

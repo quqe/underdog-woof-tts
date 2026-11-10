@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
 """Minimal HTTP wrapper around Underdog Woof (https://huggingface.co/ConwayResearch/Underdog-Woof).
 
     GET /tts?<raw text>              -> audio/wav
@@ -83,6 +85,9 @@ code{background:#f4f4f5;padding:.15rem .3rem;border-radius:4px}</style></head>
 <p>Or straight from the shell:<br>
 <code>curl -o speech.wav "http://localhost:__PORT__/tts?my%20super%20text"</code><br>
 <code>curl -o fast.wav "http://localhost:__PORT__/tts?my%20super%20text&amp;rate=1.3"</code></p>
+<footer>Voice by <a href="https://underdog.ai">Underdog Woof</a> &middot;
+wrapper code MIT &middot; model under the
+<a href="https://github.com/quqe/underdog-woof-tts/blob/main/LICENSING.md">Underdog Non-Commercial License</a></footer>
 </body></html>
 """
 
@@ -225,6 +230,12 @@ class Handler(BaseHTTPRequestHandler):
                 "max_chars": MAX_CHARS,
                 "ffmpeg": bool(FFMPEG_PATH),
                 "rate_range": [MIN_RATE, MAX_RATE],
+                "license": {
+                    "code": "MIT",
+                    "model": "Underdog-NonCommercial-1.0",
+                    "attribution": "Voice by Underdog Woof",
+                    "details": "https://github.com/quqe/underdog-woof-tts/blob/main/LICENSING.md",
+                },
                 "uptime_s": round(time.time() - STARTED, 1),
                 "requests": REQUESTS,
                 "audio_seconds": round(TTS_SECONDS, 1),
