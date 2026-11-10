@@ -1,0 +1,22 @@
+services:
+  tts:
+    build: .
+    image: underdog-woof-tts:1.0
+    container_name: underdog-woof-tts
+    ports:
+      - "3005:3005"
+    environment:
+      DEFAULT_VOICE: juno
+      MAX_CHARS: "2000"
+      QUEUE_TIMEOUT: "120"
+      # 2 keeps Juno+Mira warm (~610 MB peak). Set to 1 to stay around 320 MB.
+      MAX_VOICES_LOADED: "2"
+    # Measured: ~320 MB peak for one voice, ~610 MB with both voices loaded.
+    mem_limit: 1g
+    cpus: 1.0
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp

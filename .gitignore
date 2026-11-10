@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*.wav
+.venv/
+.pytest_cache/
+
+# model weights are downloaded at build time (see Dockerfile / scripts/fetch_model.py)
+woof_int8.npz

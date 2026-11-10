@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.wav
+.venv/
+.git/
+# weights come from Hugging Face during build, not from the build context
+woof_int8.npz
