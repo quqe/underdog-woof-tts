@@ -98,6 +98,23 @@ sha256sum /tmp/ff.tar.xz
 docker compose build --build-arg FFMPEG_URL="https://..." --build-arg FFMPEG_SHA="<sha256>"
 ```
 
+If no external host is reachable at all, vendor the files. Download them on a machine with
+internet and copy them into the build context:
+
+```bash
+# on your laptop
+curl -L -o ff.tar.xz "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz"
+tar -xJf ff.tar.xz && cp ffmpeg-6.0.1-amd64-static/ffmpeg vendor/ffmpeg
+scp vendor/ffmpeg user@server:/path/to/underdog-woof-tts/vendor/
+
+# on the server: weights too, if Hugging Face is blocked
+# (from the HF repo: woof_int8.npz, sha256 d895fbbe84b8f4f461e3e94ab48b1164353b1988ce8d365f5aa8263d0de1203e)
+docker compose build --no-cache
+```
+
+The build logs `using vendored ffmpeg from vendor/ffmpeg` when it takes this path. See
+[vendor/README.md](vendor/README.md).
+
 Behind an HTTP proxy, the Docker daemon needs its own proxy configuration
 (`/etc/systemd/system/docker.service.d/http-proxy.conf`), not just shell variables.
 

@@ -1,0 +1,4 @@
+# SPDX-FileCopyrightText: 2026 Ilia Okhrimenko
+# SPDX-License-Identifier: MIT
+ffmpeg
+woof_int8.npz

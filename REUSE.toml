@@ -7,7 +7,7 @@ SPDX-FileCopyrightText = "2026 Conway"
 SPDX-License-Identifier = "LicenseRef-Underdog-NonCommercial-1.0"
 
 [[annotations]]
-path = ["README.md", "CONTRIBUTING.md", "LICENSING.md", "docker-compose.yml"]
+path = ["README.md", "CONTRIBUTING.md", "LICENSING.md", "docker-compose.yml", "vendor/README.md"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Ilia Okhrimenko"
 SPDX-License-Identifier = "MIT"
