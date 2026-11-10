@@ -24,9 +24,13 @@ license** (license@conway.tech) even though the wrapper code is MIT. Full detail
 On any machine with Docker and Docker Compose:
 
 ```bash
-# 1. get the code
+# 1. get the code - clone it...
 git clone https://github.com/quqe/underdog-woof-tts.git
 cd underdog-woof-tts
+
+# ...or download the archive with curl (no git needed, same files, no history)
+curl -L https://github.com/quqe/underdog-woof-tts/archive/refs/heads/main.tar.gz | tar xz
+cd underdog-woof-tts-main
 
 # 2. build and start (first build downloads ~140 MB: numpy, ffmpeg, weights)
 docker compose up -d --build
@@ -41,6 +45,9 @@ curl -o mira.wav   "http://localhost:3005/tts?Hello%20there!&voice=mira"
 # 4. full end-to-end check (16 checks, needs curl)
 ./scripts/smoke_test.sh http://localhost:3005
 ```
+
+Any release tag works the same way: `/archive/refs/tags/<tag>.tar.gz` unrolls into
+`underdog-woof-tts-<tag>/`.
 
 The service listens on port 3005. `docker compose down` stops it, `docker compose logs -f`
 follows the logs, and `restart: unless-stopped` brings it back after a reboot.
