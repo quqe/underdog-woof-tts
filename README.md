@@ -46,7 +46,7 @@ https://huggingface.co/ConwayResearch/Underdog-Woof/resolve/<revision>/woof_int8
 |---|---|
 | Weights repository and revision | `ARG WOOF_REPO`, `ARG WOOF_REVISION` in `Dockerfile` |
 | Weights checksum | `ARG WOOF_SHA256` (`d895fbbe…`) |
-| Static ffmpeg version and checksum | `ARG FFMPEG_VERSION`, `FFMPEG_SHA` per architecture |
+| Static ffmpeg release and checksums | `ARG FFMPEG_STATIC_TAG`, per-architecture `DEFAULT_SHA` |
 
 Both can be overridden at build time:
 
@@ -76,7 +76,7 @@ Check reachability of every host the build needs:
 
 ```bash
 for u in https://deb.debian.org https://pypi.org/simple/ \
-         https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz \
+         https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-x64 \
          https://huggingface.co/ConwayResearch/Underdog-Woof/resolve/be702960539777fc3f698e54335276a8391b00f9/woof_int8.npz; do
   printf '%-110s ' "$u"; curl -sIL --max-time 20 "$u" | awk '/^HTTP/{c=$2} END{print c}'
 done
@@ -88,14 +88,14 @@ If Hugging Face is unreachable, use a mirror:
 docker compose build --build-arg HF_ENDPOINT=https://hf-mirror.com
 ```
 
-If `johnvansickle.com` is unreachable, point the build at another static tarball. Any archive
-containing an `ffmpeg` binary works (the build locates it with `find`), but the checksum must
-match - compute it on the host first:
+If GitHub is unreachable but `johnvansickle.com` works, point the build there instead. The
+step accepts either a tarball or a single binary, but the checksum must match - compute it on
+the host first:
 
 ```bash
-curl -L -o /tmp/ff.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+curl -L -o /tmp/ff.tar.xz "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz"
 sha256sum /tmp/ff.tar.xz
-docker compose build --build-arg FFMPEG_URL="https://..." --build-arg FFMPEG_SHA="<sha256>"
+docker compose build --build-arg FFMPEG_URL="https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz" --build-arg FFMPEG_SHA="<sha256>"
 ```
 
 If no external host is reachable at all, vendor the files. Download them on a machine with
@@ -103,9 +103,9 @@ internet and copy them into the build context:
 
 ```bash
 # on your laptop
-curl -L -o ff.tar.xz "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz"
-tar -xJf ff.tar.xz && cp ffmpeg-6.0.1-amd64-static/ffmpeg vendor/ffmpeg
-scp vendor/ffmpeg user@server:/path/to/underdog-woof-tts/vendor/
+curl -L -o ff "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-x64"
+cp ff ffmpeg && chmod +x ffmpeg
+scp ffmpeg user@server:/path/to/underdog-woof-tts/vendor/
 
 # on the server: weights too, if Hugging Face is blocked
 # (from the HF repo: woof_int8.npz, sha256 d895fbbe84b8f4f461e3e94ab48b1164353b1988ce8d365f5aa8263d0de1203e)
@@ -255,10 +255,10 @@ scripts/fetch_model.py download weights and model code for local runs
 The weights (`woof_int8.npz`) are not committed: they arrive at build time from Hugging Face,
 which keeps this repository small and gives the model author download statistics.
 
-Static ffmpeg comes from `johnvansickle.com`, version 6.0.1 pinned and sha256-verified
-(builds for `amd64` and `arm64`). Only the binary itself lands in the image: `ffprobe`,
-`ffplay` and man pages are dropped, so the image does not grow by the ~600 MB that
-`apt install ffmpeg` would pull in.
+Static ffmpeg is a johnvansickle.com build mirrored to GitHub releases
+(`eugeneware/ffmpeg-static`, tag pinned) - one statically linked binary, checksums pinned per
+architecture. Only the binary itself lands in the image: `ffprobe`, `ffplay` and man pages are
+dropped, so the image does not grow by the ~600 MB that `apt install ffmpeg` would pull in.
 
 Refresh the model locally:
 

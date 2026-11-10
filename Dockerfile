@@ -15,8 +15,9 @@ FROM python:3.13-slim AS assets
 
 ARG TARGETARCH=amd64
 
-# Static ffmpeg (76 MB binary instead of ~600 MB of apt dependencies).
-ARG FFMPEG_VERSION=6.0.1
+# Static ffmpeg, mirrored on GitHub releases so the build survives hosts that block
+# johnvansickle.com. Both the tag and the per-arch checksum are pinned.
+ARG FFMPEG_STATIC_TAG=b6.1.1
 ARG FFMPEG_URL=""
 ARG FFMPEG_SHA=""
 
@@ -42,25 +43,32 @@ RUN set -eux; \
     else \
         case "$TARGETARCH" in \
             amd64) \
-                DEFAULT_URL="https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz"; \
-                DEFAULT_SHA="28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5" \
+                DEFAULT_URL="https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_STATIC_TAG}/ffmpeg-linux-x64"; \
+                DEFAULT_SHA="e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99" \
                 ;; \
             arm64) \
-                DEFAULT_URL="https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-arm64-static.tar.xz"; \
-                DEFAULT_SHA="7dbd8e2f47bd83de591b9d6ea70e67d32d9aa97e7d47ae402b60c2fe3fd4d0ab" \
+                DEFAULT_URL="https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_STATIC_TAG}/ffmpeg-linux-arm64"; \
+                DEFAULT_SHA="6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce" \
                 ;; \
             *) echo "no pinned static ffmpeg for TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
         esac; \
         URL="${FFMPEG_URL:-$DEFAULT_URL}"; \
         SHA="${FFMPEG_SHA:-$DEFAULT_SHA}"; \
         echo "downloading ffmpeg from $URL"; \
-        curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 "$URL" -o /tmp/ff.tar.xz; \
-        echo "$SHA  /tmp/ff.tar.xz" | sha256sum -c -; \
-        tar -xJf /tmp/ff.tar.xz -C /tmp; \
-        FFMPEG_BIN="$(find /tmp -maxdepth 4 -type f -name ffmpeg | head -n1)"; \
-        test -n "$FFMPEG_BIN"; \
-        install -m 0755 "$FFMPEG_BIN" /usr/local/bin/ffmpeg; \
-        rm -rf /tmp/ff.tar.xz /tmp/ffmpeg-*static*; \
+        curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 "$URL" -o /tmp/ff.bin; \
+        echo "$SHA  /tmp/ff.bin" | sha256sum -c -; \
+        if tar -tJf /tmp/ff.bin >/dev/null 2>&1; then \
+            echo "archive detected, extracting"; \
+            tar -xJf /tmp/ff.bin -C /tmp; \
+            FFMPEG_BIN="$(find /tmp -maxdepth 4 -type f -name ffmpeg | head -n1)"; \
+            test -n "$FFMPEG_BIN"; \
+            install -m 0755 "$FFMPEG_BIN" /usr/local/bin/ffmpeg; \
+            rm -rf /tmp/ffmpeg-*static*; \
+        else \
+            echo "single binary detected"; \
+            install -m 0755 /tmp/ff.bin /usr/local/bin/ffmpeg; \
+        fi; \
+        rm -f /tmp/ff.bin; \
     fi; \
     ffmpeg -hide_banner -version | head -n1
 
