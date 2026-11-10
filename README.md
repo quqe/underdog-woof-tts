@@ -21,14 +21,29 @@ license** (license@conway.tech) even though the wrapper code is MIT. Full detail
 
 ## Quick start
 
-```bash
-docker compose up -d --build      # or: make run
+On any machine with Docker and Docker Compose:
 
+```bash
+# 1. get the code
+git clone https://github.com/quqe/underdog-woof-tts.git
+cd underdog-woof-tts
+
+# 2. build and start (first build downloads ~140 MB: numpy, ffmpeg, weights)
+docker compose up -d --build
+docker compose ps            # wait for "Up ... (healthy)", about 20 s
+
+# 3. check it answers
+curl -s http://localhost:3005/health
 curl -o speech.wav "http://localhost:3005/tts?my%20super%20text"
 curl -o fast.wav   "http://localhost:3005/tts?my%20super%20text&rate=1.3"
 curl -o mira.wav   "http://localhost:3005/tts?Hello%20there!&voice=mira"
-curl               "http://localhost:3005/health"
+
+# 4. full end-to-end check (16 checks, needs curl)
+./scripts/smoke_test.sh http://localhost:3005
 ```
+
+The service listens on port 3005. `docker compose down` stops it, `docker compose logs -f`
+follows the logs, and `restart: unless-stopped` brings it back after a reboot.
 
 The 40.6 MB model weights are **not stored in this repository**: the build downloads them
 from Hugging Face at a pinned revision and verifies their sha256. Internet access is only
