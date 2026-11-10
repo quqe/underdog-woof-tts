@@ -63,6 +63,44 @@ python scripts/fetch_model.py          # writes woof_int8.npz into the project
 #                                            with COPY woof_int8.npz ./
 ```
 
+### Build troubleshooting
+
+The download stage is split into individual steps, so the failing command is always the last
+one in the log. To build only that stage and see exactly what broke:
+
+```bash
+docker build --progress plain --no-cache --target assets -t woof-assets . 2>&1 | tail -40
+```
+
+Check reachability of every host the build needs:
+
+```bash
+for u in https://deb.debian.org https://pypi.org/simple/ \
+         https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz \
+         https://huggingface.co/ConwayResearch/Underdog-Woof/resolve/be702960539777fc3f698e54335276a8391b00f9/woof_int8.npz; do
+  printf '%-110s ' "$u"; curl -sIL --max-time 20 "$u" | awk '/^HTTP/{c=$2} END{print c}'
+done
+```
+
+If Hugging Face is unreachable, use a mirror:
+
+```bash
+docker compose build --build-arg HF_ENDPOINT=https://hf-mirror.com
+```
+
+If `johnvansickle.com` is unreachable, point the build at another static tarball. Any archive
+containing an `ffmpeg` binary works (the build locates it with `find`), but the checksum must
+match - compute it on the host first:
+
+```bash
+curl -L -o /tmp/ff.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+sha256sum /tmp/ff.tar.xz
+docker compose build --build-arg FFMPEG_URL="https://..." --build-arg FFMPEG_SHA="<sha256>"
+```
+
+Behind an HTTP proxy, the Docker daemon needs its own proxy configuration
+(`/etc/systemd/system/docker.service.d/http-proxy.conf`), not just shell variables.
+
 ## API
 
 ### `GET /tts?<text>`

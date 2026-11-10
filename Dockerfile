@@ -6,35 +6,60 @@
 # --- stage 1: downloadable assets -------------------------------------------
 # Both downloads are pinned and checksum-verified, so the build is reproducible
 # and the repo does not have to carry the 40 MB weights.
+#
+# Every step is its own RUN: if the network blocks one host, the failing command
+# is obvious in the build log. Each host can be overridden, for example:
+#   docker compose build --build-arg HF_ENDPOINT=https://hf-mirror.com
+#   docker compose build --build-arg FFMPEG_URL=<mirror-url> --build-arg FFMPEG_SHA=<sha256>
 FROM python:3.13-slim AS assets
 
 ARG TARGETARCH=amd64
+
+# Static ffmpeg (76 MB binary instead of ~600 MB of apt dependencies).
 ARG FFMPEG_VERSION=6.0.1
+ARG FFMPEG_URL=""
+ARG FFMPEG_SHA=""
 
 # Model weights: fetched from the author's Hugging Face repo at a pinned revision.
+ARG HF_ENDPOINT=https://huggingface.co
 ARG WOOF_REPO=ConwayResearch/Underdog-Woof
 ARG WOOF_REVISION=be702960539777fc3f698e54335276a8391b00f9
 ARG WOOF_SHA256=d895fbbe84b8f4f461e3e94ab48b1164353b1988ce8d365f5aa8263d0de1203e
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
- && rm -rf /var/lib/apt/lists/* \
- # static ffmpeg: a single 76 MB binary instead of ~600 MB of apt dependencies
- && case "$TARGETARCH" in \
-        amd64) FFMPEG_SHA=28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5 ;; \
-        arm64) FFMPEG_SHA=7dbd8e2f47bd83de591b9d6ea70e67d32d9aa97e7d47ae402b60c2fe3fd4d0ab ;; \
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        amd64) \
+            DEFAULT_URL="https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz"; \
+            DEFAULT_SHA="28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5" \
+            ;; \
+        arm64) \
+            DEFAULT_URL="https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-arm64-static.tar.xz"; \
+            DEFAULT_SHA="7dbd8e2f47bd83de591b9d6ea70e67d32d9aa97e7d47ae402b60c2fe3fd4d0ab" \
+            ;; \
         *) echo "no pinned static ffmpeg for TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
-    esac \
- && curl -fsSL "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static.tar.xz" \
-        -o /tmp/ff.tar.xz \
- && echo "$FFMPEG_SHA  /tmp/ff.tar.xz" | sha256sum -c - \
- && tar -xJf /tmp/ff.tar.xz -C /tmp \
- && install -m 0755 "/tmp/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static/ffmpeg" /usr/local/bin/ffmpeg \
- && rm -rf /tmp/ff.tar.xz "/tmp/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static" \
- # model weights
- && curl -fsSL "https://huggingface.co/${WOOF_REPO}/resolve/${WOOF_REVISION}/woof_int8.npz" \
-        -o /woof_int8.npz \
- && echo "$WOOF_SHA256  /woof_int8.npz" | sha256sum -c -
+    esac; \
+    URL="${FFMPEG_URL:-$DEFAULT_URL}"; \
+    SHA="${FFMPEG_SHA:-$DEFAULT_SHA}"; \
+    echo "downloading ffmpeg from $URL"; \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 "$URL" -o /tmp/ff.tar.xz; \
+    echo "$SHA  /tmp/ff.tar.xz" | sha256sum -c -; \
+    tar -xJf /tmp/ff.tar.xz -C /tmp; \
+    FFMPEG_BIN="$(find /tmp -maxdepth 4 -type f -name ffmpeg | head -n1)"; \
+    test -n "$FFMPEG_BIN"; \
+    install -m 0755 "$FFMPEG_BIN" /usr/local/bin/ffmpeg; \
+    rm -rf /tmp/ff.tar.xz /tmp/ffmpeg-*static*; \
+    ffmpeg -hide_banner -version | head -n1
+
+RUN set -eux; \
+    URL="${HF_ENDPOINT}/${WOOF_REPO}/resolve/${WOOF_REVISION}/woof_int8.npz"; \
+    echo "downloading weights from $URL"; \
+    curl -fL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 "$URL" -o /woof_int8.npz; \
+    echo "$WOOF_SHA256  /woof_int8.npz" | sha256sum -c -
 
 # --- stage 2: runtime -------------------------------------------------------
 FROM python:3.13-slim
