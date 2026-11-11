@@ -3,13 +3,17 @@
 # SPDX-License-Identifier: MIT
 """Minimal HTTP wrapper around Underdog Woof (https://huggingface.co/ConwayResearch/Underdog-Woof).
 
-    GET /tts?<raw text>              -> audio/wav
-    GET /tts?text=<text>&voice=...   -> audio/wav
-    GET /health                      -> JSON
-    GET /                            -> tiny web form for manual testing
+    GET  /tts?<raw text>              -> audio/wav
+    GET  /tts?text=<text>&voice=...   -> audio/wav
+    GET  /health                      -> JSON
+    GET  /                            -> tiny web form for manual testing
+    GET  /v1/models                   -> OpenAI-compatible model list
+    POST /v1/audio/speech             -> OpenAI-compatible speech endpoint
 
-Speed control: `&rate=1.3` time-stretches the result with ffmpeg's atempo filter
-(pitch preserved). stdlib http.server only, so the only Python dependency is numpy.
+Speed control: `rate` (and the OpenAI `speed`) time-stretches the result with ffmpeg's
+atempo filter (pitch preserved), chaining passes for rates outside 0.5..2.0.
+Response formats other than WAV/PCM are also encoded with ffmpeg.
+stdlib http.server only, so the only Python dependency is numpy.
 """
 from __future__ import annotations
 
@@ -42,9 +46,39 @@ PRECACHE = [v.strip() for v in os.environ.get("PRECACHE_VOICES", DEFAULT_VOICE).
 
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
 FFMPEG_PATH = shutil.which(FFMPEG_BIN)
-# atempo accepts 0.5..2.0 per pass; outside that range speed changes go artefact-heavy anyway.
-MIN_RATE, MAX_RATE = 0.5, 2.0
+# atempo accepts 0.5..2.0 per pass; wider rates are split into several passes.
+MIN_RATE, MAX_RATE = 0.25, 4.0
 TEMPO_TIMEOUT = float(os.environ.get("TEMPO_TIMEOUT", "60"))
+
+# --- OpenAI-compatible /v1/audio/speech --------------------------------------
+# The model has two voices; the OpenAI voice names are mapped onto them so that
+# existing OpenAI clients keep working without reconfiguration.
+VOICE_ALIASES = {
+    "alloy": "juno", "echo": "juno", "onyx": "juno",
+    "fable": "mira", "nova": "mira", "shimmer": "mira",
+    "juno": "juno", "mira": "mira",
+}
+OPENAI_VOICES = ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+OPENAI_MODELS = (
+    "underdog-woof", "underdog-woof-tts", "woof",
+    "tts-1", "tts-1-hd", "gpt-4o-mini-tts",
+)
+DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0]
+DEFAULT_OPENAI_VOICE = "alloy"
+DEFAULT_OPENAI_FORMAT = "mp3"
+# response_format -> (Content-Type, ffmpeg output args); wav and pcm need no encoding.
+AUDIO_FORMATS: dict[str, tuple[str, list[str] | None]] = {
+    "wav": ("audio/wav", None),
+    "pcm": ("audio/pcm", None),
+    "mp3": ("audio/mpeg", ["-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]),
+    "opus": ("audio/opus", ["-c:a", "libopus", "-b:a", "64k", "-f", "ogg"]),
+    "aac": ("audio/aac", ["-c:a", "aac", "-b:a", "128k", "-f", "adts"]),
+    "flac": ("audio/flac", ["-c:a", "flac", "-f", "flac"]),
+}
+MAX_BODY = 256 * 1024
+# Bodies above MAX_BODY are still read (and dropped) up to this size before rejecting,
+# so the client receives the 413 instead of a connection reset mid-upload.
+MAX_DRAIN = 8 * 1024 * 1024
 
 STARTED = time.time()
 REQUESTS = 0
@@ -62,12 +96,32 @@ class Busy(RuntimeError):
     pass
 
 
-class TempoError(RuntimeError):
+class FFmpegError(RuntimeError):
+    pass
+
+
+class TempoError(FFmpegError):
+    pass
+
+
+class EncodeError(FFmpegError):
     pass
 
 
 class RateUnavailable(RuntimeError):
     pass
+
+
+class ApiError(RuntimeError):
+    """A client error for the OpenAI-compatible endpoint: status, message, param, code."""
+
+    def __init__(self, status: int, message: str, param: str | None = None,
+                 type_: str = "invalid_request_error", code: str | None = None):
+        super().__init__(message)
+        self.status = status
+        self.param = param
+        self.type = type_
+        self.code = code
 
 
 def wav_seconds(data: bytes) -> float:
@@ -86,6 +140,39 @@ def pcm_to_wav(pcm: bytes) -> bytes:
     return buf.getvalue()
 
 
+def tempo_filter(rate: float) -> str:
+    """Build an atempo chain for any rate: a single pass only accepts 0.5..2.0."""
+    factors, remaining = [], rate
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining /= 0.5
+    while remaining > 2.0:
+        factors.append(2.0)
+        remaining /= 2.0
+    factors.append(remaining)
+    return ",".join(f"atempo={factor:g}" for factor in factors)
+
+
+def run_ffmpeg(args: list[str], data: bytes, timeout: float,
+               error_cls: type[FFmpegError]) -> bytes:
+    """Run ffmpeg on stdin and return its stdout; raise `error_cls` on failure."""
+    cmd = [FFMPEG_PATH or "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args]
+    try:
+        proc = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise error_cls(f"ffmpeg timed out after {timeout:g}s") from exc
+    if proc.returncode != 0 or not proc.stdout:
+        detail = proc.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise error_cls(detail[-1] if detail else f"ffmpeg exited with {proc.returncode}")
+    return proc.stdout
+
+
+def pcm_from_wav(wav: bytes) -> bytes:
+    """Strip the RIFF header: raw 16-bit mono PCM at the model sample rate."""
+    with wave.open(io.BytesIO(wav), "rb") as w:
+        return w.readframes(w.getnframes())
+
+
 def apply_tempo(wav: bytes, rate: float) -> bytes:
     """Time-stretch a WAV with ffmpeg's atempo (pitch preserved). Runs outside MODEL_LOCK.
 
@@ -94,21 +181,30 @@ def apply_tempo(wav: bytes, rate: float) -> bytes:
     """
     if not FFMPEG_PATH:
         raise RateUnavailable("ffmpeg is not installed in this image; rate!=1 is unavailable")
-    cmd = [
-        FFMPEG_PATH, "-hide_banner", "-loglevel", "error", "-nostdin",
+    args = [
         "-f", "wav", "-i", "pipe:0",
-        "-filter:a", f"atempo={rate:g}",
+        "-filter:a", tempo_filter(rate),
         "-ac", "1", "-ar", str(SR), "-acodec", "pcm_s16le", "-f", "s16le", "pipe:1",
     ]
-    try:
-        proc = subprocess.run(cmd, input=wav, capture_output=True, timeout=TEMPO_TIMEOUT)
-    except subprocess.TimeoutExpired as exc:
-        raise TempoError(f"ffmpeg timed out after {TEMPO_TIMEOUT:g}s") from exc
-    if proc.returncode != 0 or not proc.stdout:
-        detail = proc.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise TempoError(detail[-1] if detail else f"ffmpeg exited with {proc.returncode}")
-    pcm = proc.stdout[: len(proc.stdout) - (len(proc.stdout) % 2)]
+    pcm = run_ffmpeg(args, wav, TEMPO_TIMEOUT, TempoError)
+    pcm = pcm[: len(pcm) - (len(pcm) % 2)]
     return pcm_to_wav(pcm)
+
+
+def encode_audio(wav: bytes, fmt: str) -> bytes:
+    """Turn the generated WAV into the requested OpenAI `response_format`."""
+    if fmt == "wav":
+        return wav
+    if fmt == "pcm":
+        return pcm_from_wav(wav)
+    if not FFMPEG_PATH:
+        raise RateUnavailable(f"ffmpeg is not installed in this image; response_format={fmt} is unavailable")
+    args = [
+        "-f", "wav", "-i", "pipe:0",
+        "-ac", "1", "-ar", str(SR),
+        *(AUDIO_FORMATS[fmt][1] or []), "pipe:1",
+    ]
+    return run_ffmpeg(args, wav, TEMPO_TIMEOUT, EncodeError)
 
 
 def get_model(voice: str) -> Woof:
@@ -168,9 +264,59 @@ def filename_for(text: str) -> str:
     return f"{slug or 'speech'}.wav"
 
 
+def validate_speech_request(payload: dict) -> tuple[str, str, str, float, int]:
+    """Validate an OpenAI /v1/audio/speech body; return (text, voice, format, speed, seed)."""
+    model = payload.get("model", DEFAULT_OPENAI_MODEL)
+    if not isinstance(model, str) or not model.strip():
+        raise ApiError(400, "model must be a non-empty string", param="model")
+    model = model.strip()
+    if model not in OPENAI_MODELS:
+        raise ApiError(404, f"model {model!r} does not exist; available: {', '.join(OPENAI_MODELS)}",
+                       param="model", code="model_not_found")
+
+    text = payload.get("input")
+    if not isinstance(text, str) or not text.strip():
+        raise ApiError(400, "input must be a non-empty string", param="input")
+    text = text.strip()
+    if len(text) > MAX_CHARS:
+        raise ApiError(400, f"input too long: {len(text)} chars, limit is {MAX_CHARS}",
+                       param="input", code="input_too_long")
+    if not re.search(r"[A-Za-z]", text):
+        raise ApiError(400, "Underdog Woof is an English-only model; the text must contain "
+                            "Latin letters", param="input")
+
+    requested = payload.get("voice", DEFAULT_OPENAI_VOICE)
+    if not isinstance(requested, str) or requested.strip().lower() not in VOICE_ALIASES:
+        raise ApiError(400, f"unknown voice {requested!r}; available: "
+                            f"{', '.join(OPENAI_VOICES + VOICES)}", param="voice")
+    voice = VOICE_ALIASES[requested.strip().lower()]
+
+    fmt = payload.get("response_format", DEFAULT_OPENAI_FORMAT)
+    if not isinstance(fmt, str) or fmt.strip().lower() not in AUDIO_FORMATS:
+        raise ApiError(400, f"unsupported response_format {fmt!r}; available: "
+                            f"{', '.join(AUDIO_FORMATS)}", param="response_format")
+    fmt = fmt.strip().lower()
+
+    speed = payload.get("speed", 1.0)
+    if isinstance(speed, bool) or not isinstance(speed, (int, float)):
+        raise ApiError(400, "speed must be a number, e.g. 1.3", param="speed")
+    speed = float(speed)
+    if not (MIN_RATE <= speed <= MAX_RATE):
+        raise ApiError(400, f"speed must be between {MIN_RATE} and {MAX_RATE}", param="speed")
+
+    seed = payload.get("seed", 0)
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ApiError(400, "seed must be an integer", param="seed")
+
+    return text, voice, fmt, speed, seed
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "underdog-woof/1.0"
+    server_version = "underdog-woof/1.1"
     protocol_version = "HTTP/1.1"
+    # Bound per-socket reads and writes: a client that announces a body and never sends it
+    # must not pin a worker thread forever. Generation itself is not affected.
+    timeout = 30
 
     # --- helpers -----------------------------------------------------------
     def _send(self, code: int, body: bytes, ctype: str, extra: dict[str, str] | None = None):
@@ -183,11 +329,21 @@ class Handler(BaseHTTPRequestHandler):
         if not getattr(self, "_head_only", False):
             self.wfile.write(body)
 
-    def _json(self, code: int, payload: dict):
-        self._send(code, json.dumps(payload, indent=2).encode(), "application/json; charset=utf-8")
+    def _json(self, code: int, payload: dict, extra: dict[str, str] | None = None):
+        self._send(code, json.dumps(payload, indent=2).encode(), "application/json; charset=utf-8", extra)
 
     def _error(self, code: int, message: str, **extra):
         self._json(code, {"error": message, **extra})
+
+    def _openai_error(self, code: int, message: str, param: str | None = None,
+                      type_: str = "invalid_request_error", error_code: str | None = None,
+                      extra: dict[str, str] | None = None):
+        self._json(code, {"error": {
+            "message": message,
+            "type": type_,
+            "param": param,
+            "code": error_code,
+        }}, extra)
 
     # --- routes ------------------------------------------------------------
     def do_GET(self):
@@ -212,6 +368,12 @@ class Handler(BaseHTTPRequestHandler):
                 "max_chars": MAX_CHARS,
                 "ffmpeg": bool(FFMPEG_PATH),
                 "rate_range": [MIN_RATE, MAX_RATE],
+                "openai_compatible": {
+                    "speech": "POST /v1/audio/speech",
+                    "models": "GET /v1/models",
+                    "voices": list(OPENAI_VOICES),
+                    "formats": list(AUDIO_FORMATS),
+                },
                 "license": {
                     "code": "MIT",
                     "model": "Underdog-NonCommercial-1.0",
@@ -223,8 +385,16 @@ class Handler(BaseHTTPRequestHandler):
                 "audio_seconds": round(TTS_SECONDS, 1),
             })
 
+        if path == "/v1/models":
+            return self._models()
+
+        if path == "/v1/audio/speech":
+            return self._openai_error(405, "use POST /v1/audio/speech",
+                                      extra={"Allow": "POST"})
+
         if path != "/tts":
-            return self._error(404, "not found", hint="GET /tts?<text> or GET /tts?text=<text>")
+            return self._error(404, "not found",
+                               hint="GET /tts?<text>, GET /tts?text=<text>, POST /v1/audio/speech")
 
         text, params = parse_request(url.query)
         text = text.strip()
@@ -291,10 +461,129 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self._head_only = False
 
-    def do_POST(self):
-        self._error(405, "only GET is supported", allow="GET")
+    # --- OpenAI-compatible API ---------------------------------------------
+    def _models(self):
+        created = int(STARTED)
+        self._json(200, {
+            "object": "list",
+            "data": [
+                {"id": model, "object": "model", "created": created, "owned_by": "underdog-woof"}
+                for model in OPENAI_MODELS
+            ],
+        })
 
-    do_PUT = do_DELETE = do_PATCH = do_POST
+    def _drain_body(self, size: int) -> None:
+        """Read and drop a rejected request body, bounded by MAX_DRAIN."""
+        remaining = size
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                self.close_connection = True
+                return
+            remaining -= len(chunk)
+
+    def _read_json(self) -> dict:
+        if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
+            self.close_connection = True
+            raise ApiError(411, "chunked request bodies are not supported; send Content-Length")
+        length = self.headers.get("Content-Length")
+        if length is None:
+            self.close_connection = True
+            raise ApiError(411, "Content-Length is required")
+        try:
+            size = int(length)
+        except ValueError:
+            self.close_connection = True
+            raise ApiError(400, "invalid Content-Length header") from None
+        if size <= 0:
+            raise ApiError(400, "request body is empty")
+        if size > MAX_BODY:
+            if size <= MAX_DRAIN:
+                self._drain_body(size)
+            else:
+                self.close_connection = True
+            raise ApiError(413, f"request body too large: {size} bytes, limit is {MAX_BODY}",
+                           code="request_too_large")
+        raw = self.rfile.read(size)
+        if len(raw) != size:
+            self.close_connection = True
+            raise ApiError(400, "incomplete request body")
+        ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if ctype not in ("", "application/json"):
+            raise ApiError(415, f"unsupported Content-Type {ctype!r}; use application/json")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ApiError(400, f"invalid JSON body: {exc.msg}") from exc
+        if not isinstance(payload, dict):
+            raise ApiError(400, "request body must be a JSON object")
+        return payload
+
+    def _speech(self):
+        global REQUESTS, TTS_SECONDS
+        try:
+            payload = self._read_json()
+            text, voice, fmt, speed, seed = validate_speech_request(payload)
+        except ApiError as exc:
+            return self._openai_error(exc.status, str(exc), exc.param, exc.type, exc.code)
+
+        # Without ffmpeg there is no MP3/Opus/AAC/FLAC; fall back to WAV only when the
+        # client did not explicitly ask for a compressed format.
+        if fmt not in ("wav", "pcm") and not FFMPEG_PATH:
+            if "response_format" in payload:
+                return self._openai_error(
+                    503, f"response_format={fmt} needs ffmpeg, which is not installed in this image",
+                    type_="server_error")
+            fmt = "wav"
+
+        t0 = time.perf_counter()
+        try:
+            wav, seconds = synthesize(text, voice, seed)
+            if speed != 1.0:
+                wav = apply_tempo(wav, speed)
+                seconds = wav_seconds(wav)
+            body = encode_audio(wav, fmt)
+        except Busy as exc:
+            return self._openai_error(503, str(exc), type_="server_error")
+        except MemoryError:
+            return self._openai_error(503, "out of memory", type_="server_error")
+        except RateUnavailable as exc:
+            return self._openai_error(503, str(exc), type_="server_error")
+        except TempoError as exc:
+            return self._openai_error(500, f"time-stretch failed: {exc}", type_="server_error")
+        except EncodeError as exc:
+            return self._openai_error(500, f"audio encoding failed: {exc}", type_="server_error")
+        elapsed = time.perf_counter() - t0
+
+        with STATS_LOCK:
+            REQUESTS += 1
+            TTS_SECONDS += seconds
+
+        self.log_message('200 POST /v1/audio/speech voice=%s format=%s chars=%d speed=%g '
+                         'audio=%.2fs gen=%.2fs',
+                         voice, fmt, len(text), speed, seconds, elapsed)
+        return self._send(200, body, AUDIO_FORMATS[fmt][0], {
+            "Cache-Control": "no-store",
+            "X-Voice": voice,
+            "X-Rate": f"{speed:g}",
+            "X-Format": fmt,
+            "X-Audio-Seconds": f"{seconds:.2f}",
+            "X-Generation-Seconds": f"{elapsed:.2f}",
+            "X-Seed": str(seed),
+        })
+
+    def do_POST(self):
+        path = urlsplit(self.path).path.rstrip("/") or "/"
+        if path == "/v1/audio/speech":
+            return self._speech()
+        if path == "/tts":
+            return self._error(405, "only GET is supported for /tts", allow="GET")
+        return self._error(404, "not found", hint="POST /v1/audio/speech")
+
+    def _method_not_allowed(self):
+        self._error(405, "method not allowed", allow="GET, HEAD, POST")
+
+    do_PUT = do_DELETE = do_PATCH = _method_not_allowed
 
     def log_message(self, fmt, *args):
         line = f"{time.strftime('%H:%M:%S')} {self.address_string()} {fmt % args}"

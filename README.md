@@ -2,7 +2,8 @@
 
 A thin HTTP wrapper around [Underdog Woof](https://huggingface.co/ConwayResearch/Underdog-Woof):
 a 40 MB English text-to-speech model that runs on numpy, on CPU, without a GPU. The service
-exposes a single GET endpoint that returns a ready-to-play WAV file.
+exposes a single GET endpoint that returns a ready-to-play WAV file, plus an
+OpenAI-compatible `POST /v1/audio/speech` so existing OpenAI TTS clients work without changes.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Model license: Underdog NC 1.0](https://img.shields.io/badge/model%20license-Underdog%20NC%201.0-orange.svg)](LICENSES/LicenseRef-Underdog-NonCommercial-1.0.txt)
@@ -41,8 +42,11 @@ curl -s http://localhost:3005/health
 curl -o speech.wav "http://localhost:3005/tts?my%20super%20text"
 curl -o fast.wav   "http://localhost:3005/tts?my%20super%20text&rate=1.3"
 curl -o mira.wav   "http://localhost:3005/tts?Hello%20there!&voice=mira"
+curl -o speech.mp3 -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","voice":"nova","input":"Hello from Underdog Woof."}' \
+  http://localhost:3005/v1/audio/speech
 
-# 4. full end-to-end check (16 checks, needs curl)
+# 4. full end-to-end check (needs curl; python3 adds duration assertions)
 ./scripts/smoke_test.sh http://localhost:3005
 ```
 
@@ -177,7 +181,7 @@ also works: anything that is not `text`/`voice`/`seed`/`rate` is treated as spee
 | `text` | — | Text to speak. If omitted, the whole query string is used |
 | `voice` | `juno` | `juno` or `mira` |
 | `seed` | `0` | Integer. Same seed + same text gives identical audio |
-| `rate` | `1` | Speech rate, 0.5–2.0. `1.3` is 30% faster, pitch preserved |
+| `rate` | `1` | Speech rate, 0.25–4.0. `1.3` is 30% faster, pitch preserved |
 
 Response headers: `Content-Type: audio/wav`, `Content-Disposition` with a filename,
 `X-Voice`, `X-Rate`, `X-Audio-Seconds`, `X-Generation-Seconds`, `X-Seed`.
@@ -186,6 +190,94 @@ Errors are JSON with status 400/404/405/413/503, for example:
 
 ```json
 { "error": "empty text", "usage": "GET /tts?Hello%20there or GET /tts?text=Hello+there" }
+```
+
+### `POST /v1/audio/speech` (OpenAI-compatible)
+
+Drop-in replacement for OpenAI's speech endpoint: point an OpenAI SDK at
+`http://localhost:3005/v1`, and the model name can stay `tts-1`.
+
+```bash
+curl -o out.mp3 -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","voice":"nova","input":"Hello there."}' \
+  http://localhost:3005/v1/audio/speech
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `model` | `underdog-woof` | `underdog-woof`, `underdog-woof-tts`, `woof`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`; unknown values return 404 |
+| `input` | — | Text to speak, same `MAX_CHARS` limit as `/tts` (2000 by default) |
+| `voice` | `alloy` | OpenAI names are aliases for the two model voices, see below |
+| `response_format` | `mp3` | `wav`, `pcm`, `mp3`, `opus`, `aac`, `flac` |
+| `speed` | `1` | 0.25–4.0, same atempo engine as `/tts&rate=` |
+| `instructions` | — | Accepted and ignored (the model has no style control) |
+| `seed` | `0` | Extension: integer, same seed + same text gives identical audio |
+
+The model has two voices, so the OpenAI names are mapped onto them:
+
+| OpenAI voice | Model voice |
+|---|---|
+| `alloy`, `echo`, `onyx` | `juno` |
+| `fable`, `nova`, `shimmer` | `mira` |
+
+`juno` and `mira` are accepted directly as well. The resolved model voice is logged and
+echoed in the `X-Voice` response header.
+
+Response formats:
+
+| `response_format` | `Content-Type` | Notes |
+|---|---|---|
+| `wav` | `audio/wav` | 24 kHz mono 16-bit |
+| `pcm` | `audio/pcm` | raw 24 kHz mono 16-bit, no header |
+| `mp3` | `audio/mpeg` | 128 kbit/s |
+| `opus` | `audio/opus` | Ogg container, 64 kbit/s |
+| `aac` | `audio/aac` | ADTS, 128 kbit/s |
+| `flac` | `audio/flac` | lossless |
+
+Every format except `wav` and `pcm` is encoded with ffmpeg, a few tens of milliseconds per
+file. If an image was built without ffmpeg, compressed formats return 503; a request that
+does not set `response_format` falls back to WAV.
+
+The official OpenAI Python SDK works as usual:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:3005/v1", api_key="not-needed")
+with client.audio.speech.with_streaming_response.create(
+    model="tts-1", voice="nova", input="Hello from Underdog Woof.", response_format="mp3"
+) as response:
+    response.stream_to_file("hello.mp3")
+```
+
+Errors use the OpenAI envelope:
+
+```json
+{
+  "error": {
+    "message": "unknown voice 'zzz'; available: alloy, echo, fable, onyx, nova, shimmer, juno, mira",
+    "type": "invalid_request_error",
+    "param": "voice",
+    "code": null
+  }
+}
+```
+
+`404` = unknown model, `413` = body over 256 KB, `415` = not `application/json`,
+`500` = ffmpeg failure, `503` = busy or ffmpeg missing. Errors never include partial audio.
+
+### `GET /v1/models`
+
+OpenAI-compatible model list (abridged); every listed id is an alias for the same model:
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "id": "underdog-woof", "object": "model", "created": 1762819200, "owned_by": "underdog-woof" },
+    { "id": "tts-1", "object": "model", "created": 1762819200, "owned_by": "underdog-woof" }
+  ]
+}
 ```
 
 ### `GET /health`
@@ -198,7 +290,13 @@ Errors are JSON with status 400/404/405/413/503, for example:
   "max_voices_loaded": 2,
   "max_chars": 2000,
   "ffmpeg": true,
-  "rate_range": [0.5, 2.0],
+  "rate_range": [0.25, 4.0],
+  "openai_compatible": {
+    "speech": "POST /v1/audio/speech",
+    "models": "GET /v1/models",
+    "voices": ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+    "formats": ["wav", "pcm", "mp3", "opus", "aac", "flac"]
+  },
   "license": {
     "code": "MIT",
     "model": "Underdog-NonCommercial-1.0",
@@ -211,21 +309,26 @@ Errors are JSON with status 400/404/405/413/503, for example:
 }
 ```
 
-## Speech rate (`rate`)
+## Speech rate (`rate` / `speed`)
 
-The model itself has no speed control, so `&rate=1.3` time-stretches the finished WAV with
-ffmpeg's `atempo` filter. That is WSOLA: duration changes, pitch does not.
+The model itself has no speed control, so `&rate=1.3` (or OpenAI's `"speed": 1.3`)
+time-stretches the finished WAV with ffmpeg's `atempo` filter. That is WSOLA: duration
+changes, pitch does not.
 
 | `rate` | 12.0 s of audio becomes |
 |---|---|
+| 0.5 | 24.0 s |
 | 1 | 12.0 s |
 | 1.25 | 9.6 s |
 | 1.3 | 9.23 s |
 | 1.4 | 8.57 s |
+| 2 | 6.0 s |
 
 Cost: about 0.02 s and 20 MB of transient memory per file, outside the model mutex.
 Artefacts are practically inaudible up to 1.4x; beyond that a metallic timbre appears.
-Range is 0.5–2.0 (the limit of a single `atempo` pass); values outside it return 400.
+The range is 0.25–4.0. A single `atempo` pass only handles 0.5–2.0, so extreme values are
+split into several passes (0.25x = two 0.5x passes, 4x = two 2x passes) and sound
+noticeably more processed; values outside the range return 400.
 
 ## Resources
 
@@ -290,6 +393,7 @@ LICENSING.md           license FAQ: what you may and may not do
 REUSE.toml             machine-readable license mapping for every file
 scripts/smoke_test.sh  end-to-end checks against a running container
 scripts/fetch_model.py download weights and model code for local runs
+tests/test_app.py      unit tests for validation/ffmpeg/WAV helpers (stdlib unittest)
 tests/ui.test.js       optional headless check of the web page (jsdom)
 ```
 
@@ -309,9 +413,22 @@ python scripts/fetch_model.py
 docker compose up -d --build
 ```
 
+## Tests
+
+```bash
+make unit                                        # 28 unit tests: numpy only, no model, no network
+./scripts/smoke_test.sh http://localhost:3005    # end-to-end; needs a running service (or: make test)
+```
+
+The smoke test covers the plain GET API, every `response_format`, `speed`/`rate`, and the
+OpenAI error envelope. It needs `curl`; `python3` adds duration assertions.
+
 ## Limitations
 
 * **English only.** The API returns 400 if the text contains no Latin letters.
+* **The OpenAI endpoint has two real voices.** `alloy`/`echo`/`onyx` map to Juno, `fable`/
+  `nova`/`shimmer` to Mira; `instructions` is accepted and ignored. `seed` is an extension
+  (same seed + same text = identical audio).
 * **Underdog Non-Commercial 1.0 license** — personal, research and non-commercial use;
   published audio must credit "Underdog Woof" / underdog.ai. Commercial use requires a
   license from Underdog. See `LICENSE` and `NOTICE`.

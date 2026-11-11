@@ -11,15 +11,18 @@ test data, unless it is a deliberate test case for rejecting such input.
 
 * Do not commit model weights (`woof_int8.npz`, ~40 MB). They are downloaded at build time
   from Hugging Face at a pinned revision and verified by sha256.
-* Keep the public API stable: `GET /tts`, `GET /health`, and the `text`, `voice`, `seed`,
-  `rate` parameters. New parameters must be optional and default to current behaviour.
-* `rate` stays within 0.5–2.0; outside that range `atempo` produces audible artefacts.
+* Keep the public API stable: `GET /tts`, `GET /health`, `GET /v1/models`,
+  `POST /v1/audio/speech`, and the `text`, `voice`, `seed`, `rate` parameters. New
+  parameters must be optional and default to current behaviour.
+* `rate`/`speed` stays within 0.25–4.0. Values outside 0.5–2.0 are split into several
+  `atempo` passes and sound noticeably more processed.
 * The wrapper code is MIT; `underdog_woof/` and the weights stay under the Underdog
   Non-Commercial License 1.0. Do not relicense upstream files.
 
 ## Before pushing
 
 ```bash
+make unit
 docker compose up -d --build
 ./scripts/smoke_test.sh http://localhost:3005
 ```
