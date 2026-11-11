@@ -20,7 +20,37 @@ Running this service with the Underdog Woof model **commercially requires a comm
 license** (license@conway.tech) even though the wrapper code is MIT. Full details and an FAQ:
 [LICENSING.md](LICENSING.md).
 
-## Quick start
+## Run the published image
+
+Every push to `main` (and every `v*` tag) publishes a multi-arch image to GitHub Container
+Registry (`linux/amd64` and `linux/arm64`), so nothing has to be cloned or built:
+
+```bash
+docker run -d --name underdog-woof-tts -p 3005:3005 \
+  --memory=1g --cpus=1 --restart unless-stopped \
+  ghcr.io/quqe/underdog-woof-tts:1.0
+
+curl -s http://localhost:3005/health
+```
+
+Or with the release compose file, which carries the same limits and environment:
+
+```bash
+curl -O https://raw.githubusercontent.com/quqe/underdog-woof-tts/main/docker-compose.release.yml
+docker compose -f docker-compose.release.yml up -d
+```
+
+| Tag | Meaning |
+|---|---|
+| `1.0`, `1.0.0` | Git tag `v1.0.0`, stable release |
+| `latest`, `main` | Newest commit on `main`, may change |
+| `sha-abc1234` | Exact commit, for pinning |
+
+The package is public; no `docker login` is needed to pull. The image bundles the model
+weights, so the non-commercial terms from the table above still apply to the audio you make
+with it.
+
+## Quick start (build from source)
 
 On any machine with Docker and Docker Compose:
 
@@ -387,6 +417,8 @@ web/index.html         single-file web UI (inline CSS + JS, no external assets)
 underdog_woof/         model code from the upstream HF repository (unmodified)
 Dockerfile             multi-stage: downloads ffmpeg + weights, python:3.13-slim, non-root
 docker-compose.yml     port 3005, resource limits, read-only rootfs
+docker-compose.release.yml  same, but pulls ghcr.io instead of building
+.github/workflows/publish.yml  build + push the image to GHCR on main and v* tags
 LICENSE                MIT, applies to the wrapper code
 LICENSES/              upstream Underdog Non-Commercial License 1.0 (verbatim)
 LICENSING.md           license FAQ: what you may and may not do

@@ -42,6 +42,19 @@ generating and error states (needs Node and jsdom):
 npm install --no-save jsdom && node tests/ui.test.js
 ```
 
+## Publishing an image
+
+Every push to `main` builds and pushes `ghcr.io/quqe/underdog-woof-tts` for `linux/amd64`
+and `linux/arm64` (`.github/workflows/publish.yml`). For a stable release, tag the commit:
+
+```bash
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
+```
+
+That publishes `1.0.0`, `1.0` and `latest`. Note that the package must stay public so users
+can pull it without `docker login` (Package settings -> Change visibility -> Public).
+
 ## Commit messages
 
 English, imperative mood, short subject line under 72 characters, body wrapped at 72 columns
